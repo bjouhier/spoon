@@ -5,37 +5,50 @@ var spoon = require('..'),
     uglify = require('uglify-js');
 
 describe('Spoon', function() {
-  function test(code, what) {
-    var ast = esprima.parse(code.toString()),
-        cfg = spoon.construct(ast);
-
-    cfg.asyncify([esprima.parse(what || 'async')], {
-      declaration: 'enable spoon'
-    });
-
-    var out = spoon.render(cfg);
-    var code = uglify.uglify.gen_code(out, { beautify: true });
-
-    var res,
-        once = false;
-    vm.runInNewContext(code + ';\nfn(callback)', {
-      callback: function(r) {
-        if (once) throw new Error('Called twice');
-        once = true;
-
-        res = r;
-      }
-    });
-    return res;
-  }
-
   describe('asyncify', function() {
+    function test(code, what) {
+      var ast = esprima.parse(code.toString()),
+          cfg = spoon.construct(ast);
+
+      cfg.asyncify([esprima.parse(what || 'async')], {
+        declaration: 'enable spoon'
+      });
+
+      var out = spoon.render(cfg);
+      var code = uglify.uglify.gen_code(out, { beautify: true });
+
+      var res,
+          once = false;
+      vm.runInNewContext(code + ';\nfn(callback)', {
+        callback: function(err, r) {
+          assert.equal(err, null);
+          if (once) throw new Error('Called twice');
+          once = true;
+
+          res = r;
+        }
+      });
+      return res;
+    }
+
+    it('should asyncify two-fold operation', function() {
+      var r = test(function fn(__$callback) {
+        "enable spoon";
+        function async(a, callback) {
+          callback(null, a * a);
+        }
+
+        return async(3) + async(4);
+      }, 'async');
+      assert.equal(r, 25);
+    });
+
     it('should asyncify method', function() {
       var r = test(function fn(__$callback) {
         "enable spoon";
         var obj = {
           async: function async(a, callback) {
-            callback(a);
+            callback(null, a);
           }
         };
         return obj.async(1);
@@ -47,7 +60,7 @@ describe('Spoon', function() {
       var r = test(function fn(__$callback) {
         "enable spoon";
         function async(a, callback) {
-          callback(1);
+          callback(null, 1);
         }
         return 1, async(1), 2;
       });
@@ -58,7 +71,7 @@ describe('Spoon', function() {
       var r = test(function fn(__$callback) {
         "enable spoon";
         function async(a, callback) {
-          callback(a);
+          callback(null, a);
         }
 
         if (1 + 2 > 2) {
@@ -77,7 +90,7 @@ describe('Spoon', function() {
       var r = test(function fn(__$callback) {
         "enable spoon";
         function async(a, b, callback) {
-          callback(a + b);
+          callback(null, a + b);
         }
 
         for (var i = 0; i < 10; i++) {
@@ -90,11 +103,48 @@ describe('Spoon', function() {
       r = assert.equal(r, 46);
     });
 
+    it('should asyncify call in for loop #2', function() {
+      var r = test(function fn(__$callback) {
+        "enable spoon";
+        function async(a, b, callback) {
+          callback(null, a + b);
+        }
+
+        for (var i = async(0, 0); i < async(5, 5); i = async(i, 1)) {
+          var x = async(x || 0, 1);
+        }
+
+        return x + 1;
+      });
+
+      r = assert.equal(r, 11);
+    });
+
+    it('should asyncify call in property', function() {
+      var r = test(function fn(__$callback) {
+        "enable spoon";
+        function async(a, callback) {
+          callback(null, a);
+        }
+
+        var obj = { a: 123, b: 456, c: 789 },
+            x = 1;
+
+        for (var i in obj) {
+          x = async(obj[async(i)]) * async(x);
+        }
+
+        return x;
+      });
+
+      r = assert.equal(r, 44253432);
+    });
+
     it('should asyncify call in do while loop', function() {
       var r = test(function fn(__$callback) {
         "enable spoon";
         function async(a, b, callback) {
-          callback(a + b);
+          callback(null, a + b);
         }
 
         var x = 0,
@@ -114,7 +164,7 @@ describe('Spoon', function() {
       var r = test(function fn(__$callback) {
         "enable spoon";
         function async(a, b, callback) {
-          callback(a + b);
+          callback(null, a + b);
         }
 
         var obj = { a : 1, b : 2 };
@@ -127,6 +177,55 @@ describe('Spoon', function() {
       });
 
       r = assert.equal(r, 4);
+    });
+  });
+
+  describe('marker', function() {
+    function test(code, what) {
+      var ast = esprima.parse(code.toString()),
+          cfg = spoon.construct(ast);
+
+      cfg.asyncify([esprima.parse(what || 'async')], {
+        declaration: 'enable spoon',
+        marker: '_'
+      });
+
+      var out = spoon.render(cfg);
+      var code = uglify.uglify.gen_code(out, { beautify: true });
+
+      var res,
+          once = false;
+      vm.runInNewContext(code + ';\nfn(callback)', {
+        callback: function(err, r) {
+          assert.equal(err, null);
+          if (once) throw new Error('Called twice');
+          once = true;
+
+          res = r;
+        }
+      });
+      return res;
+    }
+
+    it('should replace marker in property', function() {
+      var r = test(function fn(_) {
+        "enable spoon";
+        function async(_, a) {
+          "enable spoon";
+          return a;
+        }
+
+        var obj = { a: 123, b: 456, c: 789 },
+            x = 1;
+
+        for (var i in obj) {
+          x = async(_, obj[async(_, i)]) * async(_, x);
+        }
+
+        return x;
+      });
+
+      r = assert.equal(r, 44253432);
     });
   });
 });
